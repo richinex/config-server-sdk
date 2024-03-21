@@ -13,6 +13,7 @@ use slog::{debug, warn, Logger};
 use serde_json::Value;
 use slog::{error, info};
 use tokio::time::{self, Duration};
+use tokio::sync::Notify;
 
 
 
@@ -24,20 +25,19 @@ pub struct ConfigSdk {
     config_endpoint: String,
     logger: Logger,
     current_config: Arc<Mutex<Option<ServerConfig>>>, // Store the latest config here
+    notify: Arc<Notify>, // Notification system for config updates
 }
 
-
-
 impl ConfigSdk {
-
     pub fn new(config_endpoint: &str) -> Self {
         Self {
             config_endpoint: config_endpoint.to_string(),
             logger: logging::configure_logging(),
             current_config: Arc::new(Mutex::new(None)),
+            notify: Arc::new(Notify::new()),
         }
     }
-    // Adjusted to retry connection five times with a delay, then return StreamEnded error
+
     pub async fn listen_for_updates(&self) -> Result<(), ConfigError> {
         let mut retry_count = 0;
         const MAX_RETRIES: usize = 5;
@@ -45,21 +45,17 @@ impl ConfigSdk {
 
         loop {
             if retry_count >= MAX_RETRIES {
-                // Exceeded the maximum number of retries
                 error!(self.logger, "Failed to connect after {} retries.", MAX_RETRIES);
-                return Err(ConfigError::GenericError("Failed to connect".into()));  // or use a different appropriate error
+                return Err(ConfigError::GenericError("Failed to connect".into()));
             }
 
-            let response = match client.get(&self.config_endpoint)
-                                       .header("Accept", "text/event-stream")
-                                       .send().await {
+            let response = match client.get(&self.config_endpoint).header("Accept", "text/event-stream").send().await {
                 Ok(response) => response,
                 Err(e) => {
                     error!(self.logger, "Failed to connect to SSE server: {}", e);
                     retry_count += 1;
-                    // Wait before attempting to reconnect
                     time::sleep(Duration::from_secs(10)).await;
-                    continue;  // Attempt to reconnect
+                    continue;
                 },
             };
 
@@ -74,11 +70,11 @@ impl ConfigSdk {
                         if text.starts_with("data: ") {
                             let json_part = text.trim_start_matches("data: ").trim();
                             if let Ok(config) = serde_json::from_str::<ServerConfig>(json_part) {
-                                // Successfully received and parsed a configuration update
                                 let mut config_lock = self.current_config.lock().unwrap();
                                 *config_lock = Some(config.clone());
+                                self.notify.notify_waiters(); // Notify all waiting tasks
                                 info!(self.logger, "Configuration updated"; "config" => format!("{:?}", config));
-                                retry_count = 0;  // Reset the retry count after a successful update
+                                retry_count = 0;
                             } else {
                                 error!(self.logger, "Failed to parse configuration data");
                             }
@@ -90,15 +86,20 @@ impl ConfigSdk {
                     },
                     Err(e) => {
                         error!(self.logger, "Error processing SSE data: {}", e);
-                        break;  
+                        break;
                     },
                 }
             }
 
-            // An error occurred or the stream ended, increment the retry counter
             retry_count += 1;
             warn!(self.logger, "Attempting to reconnect... Retry count: {}", retry_count);
             time::sleep(Duration::from_secs(10)).await;
         }
+    }
+
+    // Method to fetch the current configuration safely
+    pub fn get_current_config(&self) -> Option<ServerConfig> {
+        let config_lock = self.current_config.lock().unwrap();
+        config_lock.clone()
     }
 }
