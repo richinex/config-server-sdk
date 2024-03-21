@@ -30,7 +30,7 @@ impl ConfigSdk {
     }
 
 
-    pub async fn listen_for_updates(&self) -> Result<(), ConfigError> {
+    pub async fn listen_for_updates(&self) -> Result<ServerConfig, ConfigError> {
         let client = Client::new();
         let response = client
             .get(&self.config_endpoint)
@@ -39,7 +39,6 @@ impl ConfigSdk {
             .await?;
 
         let mut lines = response.bytes_stream();
-
 
         while let Some(item) = lines.next().await {
             match item {
@@ -59,6 +58,7 @@ impl ConfigSdk {
                                 *config_lock = Some(config.clone());
                                 // Log successful configuration update
                                 info!(self.logger, "Updated configuration"; "config" => format!("{:?}", config));
+                                return Ok(config); // Return the updated configuration
                             },
                             Err(e) => {
                                 // Log failure to parse as a configuration update
@@ -81,9 +81,10 @@ impl ConfigSdk {
             }
         }
 
-
-        Ok(())
+        // If the loop ends without returning the config, return an error indicating no configuration was received
+        Err(ConfigError::NoConfigReceived)
     }
+
 
     // Fetch the current configuration if available
     pub fn get_current_config(&self) -> Option<ServerConfig> {

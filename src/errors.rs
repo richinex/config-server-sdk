@@ -10,4 +10,8 @@ pub enum ConfigError {
 
     #[error("UTF-8 error: {0}")]
     Utf8Error(#[from] std::string::FromUtf8Error),
+
+    #[error("No configuration received")]
+    NoConfigReceived,
+
 }
