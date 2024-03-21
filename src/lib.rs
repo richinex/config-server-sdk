@@ -26,7 +26,7 @@ pub struct ConfigSdk {
     config_endpoint: String,
     logger: Logger,
     update_sender: mpsc::Sender<ServerConfig>,
-    notify: Arc<Notify>,
+    pub notify: Arc<Notify>,
 }
 
 impl ConfigSdk {
