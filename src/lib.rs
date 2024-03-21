@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use slog::{debug, warn, Logger};
 use serde_json::Value;
 use slog::{error, info};
+use tokio::time::{self, Duration};
+
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,7 +26,10 @@ pub struct ConfigSdk {
     current_config: Arc<Mutex<Option<ServerConfig>>>, // Store the latest config here
 }
 
+
+
 impl ConfigSdk {
+
     pub fn new(config_endpoint: &str) -> Self {
         Self {
             config_endpoint: config_endpoint.to_string(),
@@ -32,52 +37,68 @@ impl ConfigSdk {
             current_config: Arc::new(Mutex::new(None)),
         }
     }
-
-    // Adjusted to continuously listen and update the configuration
+    // Adjusted to retry connection five times with a delay, then return StreamEnded error
     pub async fn listen_for_updates(&self) -> Result<(), ConfigError> {
+        let mut retry_count = 0;
+        const MAX_RETRIES: usize = 5;
         let client = Client::new();
-        let response = client
-            .get(&self.config_endpoint)
-            .header("Accept", "text/event-stream")
-            .send()
-            .await?;
 
-        let mut lines = response.bytes_stream();
+        loop {
+            if retry_count >= MAX_RETRIES {
+                // Exceeded the maximum number of retries
+                error!(self.logger, "Failed to connect after {} retries.", MAX_RETRIES);
+                return Err(ConfigError::GenericError("Failed to connect".into()));  // or use a different appropriate error
+            }
 
-        while let Some(item) = lines.next().await {
-            match item {
-                Ok(bytes) => {
-                    let text = String::from_utf8(bytes.to_vec())?;
-                    info!(self.logger, "Received SSE data"; "data" => &text);
+            let response = match client.get(&self.config_endpoint)
+                                       .header("Accept", "text/event-stream")
+                                       .send().await {
+                Ok(response) => response,
+                Err(e) => {
+                    error!(self.logger, "Failed to connect to SSE server: {}", e);
+                    retry_count += 1;
+                    // Wait before attempting to reconnect
+                    time::sleep(Duration::from_secs(10)).await;
+                    continue;  // Attempt to reconnect
+                },
+            };
 
-                    if text.starts_with("data: ") {
-                        let json_part = text.trim_start_matches("data: ").trim();
-                        match serde_json::from_str::<ServerConfig>(json_part) {
-                            Ok(config) => {
-                                // Continuously update the current configuration
+            let mut lines = response.bytes_stream();
+
+            while let Some(item) = lines.next().await {
+                match item {
+                    Ok(bytes) => {
+                        let text = String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| "".to_string());
+                        info!(self.logger, "Received SSE data"; "data" => &text);
+
+                        if text.starts_with("data: ") {
+                            let json_part = text.trim_start_matches("data: ").trim();
+                            if let Ok(config) = serde_json::from_str::<ServerConfig>(json_part) {
+                                // Successfully received and parsed a configuration update
                                 let mut config_lock = self.current_config.lock().unwrap();
                                 *config_lock = Some(config.clone());
                                 info!(self.logger, "Configuration updated"; "config" => format!("{:?}", config));
-                            },
-                            Err(e) => {
-                                error!(self.logger, "Failed to parse configuration data"; "error" => e.to_string());
+                                retry_count = 0;  // Reset the retry count after a successful update
+                            } else {
+                                error!(self.logger, "Failed to parse configuration data");
                             }
+                        } else if text.trim().is_empty() || text.starts_with(":") {
+                            debug!(self.logger, "Non-data message received"; "message" => &text);
+                        } else {
+                            warn!(self.logger, "Unexpected SSE message format"; "message" => &text);
                         }
-                    } else if text.trim().is_empty() || text.starts_with(":") {
-                        debug!(self.logger, "Non-data message received"; "message" => &text);
-                    } else {
-                        warn!(self.logger, "Unexpected SSE message format"; "message" => &text);
-                    }
-                },
-                Err(e) => {
-                    error!(self.logger, "Error processing SSE data"; "error" => format!("{:?}", e));
-                    // Consider implementing a reconnection strategy here
-                },
+                    },
+                    Err(e) => {
+                        error!(self.logger, "Error processing SSE data: {}", e);
+                        break;  
+                    },
+                }
             }
-        }
 
-        // If you reach this point, it means the listening loop has exited.
-        // You might want to handle this scenario, possibly by attempting to reconnect.
-        Err(ConfigError::GenericError("Listening loop exited".to_string()))
+            // An error occurred or the stream ended, increment the retry counter
+            retry_count += 1;
+            warn!(self.logger, "Attempting to reconnect... Retry count: {}", retry_count);
+            time::sleep(Duration::from_secs(10)).await;
+        }
     }
 }
