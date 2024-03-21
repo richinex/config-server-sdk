@@ -11,12 +11,12 @@ use slog::{error, info};
 
 use std::{collections::BTreeMap, sync::{Arc, Mutex}};
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Config {
+pub struct ServerConfig {
     pub settings: BTreeMap<String, Value>,
 }
 pub struct ConfigSdk {
     config_endpoint: String,
-    current_config: Arc<Mutex<Option<Config>>>,
+    current_config: Arc<Mutex<Option<ServerConfig>>>,
     logger: Logger,
 }
 
@@ -46,7 +46,7 @@ impl ConfigSdk {
                     info!(self.logger, "Received SSE data"; "data" => &text);
                     if text.starts_with("data: ") {
                         let json_part = text.trim_start_matches("data: ");
-                        if let Ok(config) = serde_json::from_str::<Config>(json_part) {
+                        if let Ok(config) = serde_json::from_str::<ServerConfig>(json_part) {
                             let mut config_lock = self.current_config.lock().unwrap();
                             *config_lock = Some(config.clone());
                             info!(self.logger, "Updated configuration"; "config" => format!("{:?}", config));
@@ -66,7 +66,7 @@ impl ConfigSdk {
     }
 
     // Fetch the current configuration if available
-    pub fn get_current_config(&self) -> Option<Config> {
+    pub fn get_current_config(&self) -> Option<ServerConfig> {
         let config_lock = self.current_config.lock().unwrap();
         config_lock.clone()
     }
