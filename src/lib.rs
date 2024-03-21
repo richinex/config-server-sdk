@@ -45,7 +45,8 @@ impl ConfigSdk {
                     let text = String::from_utf8(bytes.to_vec())?;
                     info!(self.logger, "Received SSE data"; "data" => &text);
                     if text.starts_with("data: ") {
-                        let json_part = text.trim_start_matches("data: ");
+                        // Trim "data: " prefix before parsing the JSON
+                        let json_part = text["data: ".len()..].trim();
                         if let Ok(config) = serde_json::from_str::<ServerConfig>(json_part) {
                             let mut config_lock = self.current_config.lock().unwrap();
                             *config_lock = Some(config.clone());
@@ -64,6 +65,7 @@ impl ConfigSdk {
 
         Ok(())
     }
+
 
     // Fetch the current configuration if available
     pub fn get_current_config(&self) -> Option<ServerConfig> {
