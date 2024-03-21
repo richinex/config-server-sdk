@@ -33,8 +33,8 @@ impl ConfigSdk {
         }
     }
 
-    // Modified to return the latest ServerConfig on success
-    pub async fn listen_for_updates(&self) -> Result<ServerConfig, ConfigError> {
+    // Adjusted to continuously listen and update the configuration
+    pub async fn listen_for_updates(&self) -> Result<(), ConfigError> {
         let client = Client::new();
         let response = client
             .get(&self.config_endpoint)
@@ -54,17 +54,13 @@ impl ConfigSdk {
                         let json_part = text.trim_start_matches("data: ").trim();
                         match serde_json::from_str::<ServerConfig>(json_part) {
                             Ok(config) => {
-                                // Update the current configuration
+                                // Continuously update the current configuration
                                 let mut config_lock = self.current_config.lock().unwrap();
                                 *config_lock = Some(config.clone());
-                                info!(self.logger, "Updated configuration"; "config" => format!("{:?}", config));
-
-                                // Return the newly updated configuration
-                                return Ok(config);
+                                info!(self.logger, "Configuration updated"; "config" => format!("{:?}", config));
                             },
                             Err(e) => {
                                 error!(self.logger, "Failed to parse configuration data"; "error" => e.to_string());
-                                // Consider whether to continue listening or return an error
                             }
                         }
                     } else if text.trim().is_empty() || text.starts_with(":") {
@@ -75,13 +71,13 @@ impl ConfigSdk {
                 },
                 Err(e) => {
                     error!(self.logger, "Error processing SSE data"; "error" => format!("{:?}", e));
-                    return Err(e.into());
+                    // Consider implementing a reconnection strategy here
                 },
             }
         }
 
-        // If the loop exits without returning a config, you need to decide how to handle this.
-        // For example, you could loop indefinitely, retry with a delay, or return a specific error.
-        Err(ConfigError::NoConfigReceived)
+        // If you reach this point, it means the listening loop has exited.
+        // You might want to handle this scenario, possibly by attempting to reconnect.
+        Err(ConfigError::GenericError("Listening loop exited".to_string()))
     }
 }

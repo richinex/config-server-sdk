@@ -14,4 +14,7 @@ pub enum ConfigError {
     #[error("No configuration received")]
     NoConfigReceived,
 
+    #[error("Configuration error: {0}")]
+    GenericError(String), // Generic error variant
+
 }
