@@ -33,7 +33,8 @@ impl ConfigSdk {
         }
     }
 
-    pub async fn listen_for_updates(&self) -> Result<(), ConfigError> {
+    // Modified to return the latest ServerConfig on success
+    pub async fn listen_for_updates(&self) -> Result<ServerConfig, ConfigError> {
         let client = Client::new();
         let response = client
             .get(&self.config_endpoint)
@@ -57,9 +58,13 @@ impl ConfigSdk {
                                 let mut config_lock = self.current_config.lock().unwrap();
                                 *config_lock = Some(config.clone());
                                 info!(self.logger, "Updated configuration"; "config" => format!("{:?}", config));
+
+                                // Return the newly updated configuration
+                                return Ok(config);
                             },
                             Err(e) => {
                                 error!(self.logger, "Failed to parse configuration data"; "error" => e.to_string());
+                                // Consider whether to continue listening or return an error
                             }
                         }
                     } else if text.trim().is_empty() || text.starts_with(":") {
@@ -75,12 +80,8 @@ impl ConfigSdk {
             }
         }
 
-        Ok(())
-    }
-
-    // Public method to fetch the current configuration
-    pub fn get_current_config(&self) -> Option<ServerConfig> {
-        let config_lock = self.current_config.lock().unwrap();
-        (*config_lock).clone()
+        // If the loop exits without returning a config, you need to decide how to handle this.
+        // For example, you could loop indefinitely, retry with a delay, or return a specific error.
+        Err(ConfigError::NoConfigReceived)
     }
 }
