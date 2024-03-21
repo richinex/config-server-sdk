@@ -1,0 +1,21 @@
+[package]
+name = "config-server-sdk"
+version = "0.1.0"
+edition = "2021"
+authors = ["Richard Chukwu <richinex@gmail.com>"]
+description = "A library for listening to configuration updates via SSE."
+repository = "https://github.com/yourusername/config-server-sdk"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json", "stream"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+thiserror = "1.0"
+slog = "2.7"
+slog-async = "2.6"
+slog-json = "2.3"
+slog-term = "2.8"
