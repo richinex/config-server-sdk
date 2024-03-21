@@ -88,6 +88,16 @@ impl ConfigSdk {
     // Fetch the current configuration if available
     pub fn get_current_config(&self) -> Option<ServerConfig> {
         let config_lock = self.current_config.lock().unwrap();
-        config_lock.clone()
+        match *config_lock {
+            Some(ref config) => {
+                info!(self.logger, "Retrieving current configuration"; "config" => format!("{:?}", config));
+                Some(config.clone())
+            },
+            None => {
+                warn!(self.logger, "No current configuration available");
+                None
+            },
+        }
     }
+
 }
